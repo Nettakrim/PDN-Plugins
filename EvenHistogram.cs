@@ -5,15 +5,14 @@
 // Version: 1.2
 // Desc: Evens out the histogram of the selected area
 // Keywords:
-// URL:
+// URL: https://netal.co.uk/
 // Help: CC0 - Public Domain, when building make sure to enable Single Threaded and Single Render Call
 
 #region UICode
-IntSliderControl MaxIterations = 0; // [0,1000000] Amount of iterations to try solve for, set to 0 to go until solved
-IntSliderControl BonusSteps = 256; // [0,256] Extra steps per iteration, massively speeds up solving
-CheckboxControl Grayscale = false; // Grayscale, using red channel
+DoubleSliderControl Mix = 1; // [-1,2] Mix, values outside of 0-1 will extrapolate
 DoubleSliderControl Median = 0; // [0,1] Choose the median value for each color, to remove noise
-CheckboxControl RunAgain = false; // Run twice, works well with averaging, on colorful images
+CheckboxControl RunAgain = false; // Run twice, works well with averaging on images that have gradients
+CheckboxControl Grayscale = false; // Grayscale, using red channel
 IntSliderControl Seed = 0; // [0,1024] Seed for all the random decisions needed
 #endregion
 
@@ -158,7 +157,7 @@ private void Shift(Bar[] bars, int index, Random random) {
 
 private void Diffuse(Bar[] bars, Random random) {
     // iteratively diffuse histogram
-    for (int x = 0; x < MaxIterations || MaxIterations == 0; x++)
+    while (true)
     {
         if (IsCancelRequested) return;
 
@@ -193,7 +192,7 @@ private void Diffuse(Bar[] bars, Random random) {
 
         int shuffleA = random.Next(256);
         int shuffleB = random.Next(256);
-        for (int i = 0; i < BonusSteps; i++)
+        for (int i = 0; i < 256; i++)
         {
             Shift(bars, ((i ^ shuffleA)+shuffleB)&255, random);
         }
@@ -293,6 +292,10 @@ private void Run(RectInt32 selection, ColorBgr32[,] pixels, Random random, bool 
     }
 }
 
+private byte Lerp(byte a, byte b) {
+    return (byte)Math.Clamp(Math.Round((a + (b-(int)a)*Mix)),0,255);
+}
+
 protected override void OnRender(IBitmapEffectOutput output)
 {
     using IEffectInputBitmap<ColorBgra32> sourceBitmap = Environment.GetSourceBitmapBgra32();
@@ -330,7 +333,8 @@ protected override void OnRender(IBitmapEffectOutput output)
         for (int x = 0; x < selection.Width; ++x)
         {
             ColorBgr32 color = pixels[x, y];
-            outputRegion[x + selection.Left, y + selection.Top] = new ColorBgra32(color.B, color.G, color.R, sourceRegion[x + selection.Left, y + selection.Top].A);
+            ColorBgra32 source = sourceRegion[x + selection.Left, y + selection.Top];
+            outputRegion[x + selection.Left, y + selection.Top] = new ColorBgra32(Lerp(source.B, color.B), Lerp(source.G, color.G), Lerp(source.R, color.R), source.A);
         }
     }
 }
