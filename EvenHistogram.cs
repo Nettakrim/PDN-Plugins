@@ -2,7 +2,7 @@
 // Submenu:
 // Author: Nettakrim
 // Title:
-// Version: 1.3
+// Version: 1.4
 // Desc: Evens out the histogram of the selected area
 // Keywords:
 // URL: https://github.com/Nettakrim/PDN-Plugins
@@ -11,9 +11,9 @@
 #region UICode
 DoubleSliderControl Mix = 1; // [-1,2] Mix, extrapolates when outside 0-1
 CheckboxControl Grayscale = false; // Grayscale, using red channel
-CheckboxControl Denoising = false; // Enable denoising
+CheckboxControl Denoising = false; // Enable denoising, will mean histogram isnt perfectly even
 DoubleSliderControl Median = 1; // [0,1] {Denoising} Denoising Strength
-CheckboxControl RunAgain = false; // {Denoising} Run again after denoising\n(Maintains even histogram, but can reintroduce noise)
+CheckboxControl RunAgain = false; // {Denoising} Run again after denoising\n(Makes histogram even again, but can reintroduce noise)
 IntSliderControl Seed = 0; // [0,65535] Seed for all the random decisions needed
 #endregion
 
@@ -288,7 +288,7 @@ private Bar[] Solve(Bar[] bars, Random random, bool average) {
     return transposed;
 }
 
-private Bar[] GetBars(RectInt32 selection, ColorBgr32[,] pixels, int index) {
+private Bar[] GetBars(RectInt32 selection, ColorBgr24[,] pixels, int index) {
     // initialise histogram
     Bar[] bars = new Bar[256];
     for (int i = 0; i < 256; i++)
@@ -310,7 +310,7 @@ private Bar[] GetBars(RectInt32 selection, ColorBgr32[,] pixels, int index) {
     return bars;
 }
 
-private void Run(RectInt32 selection, ColorBgr32[,] pixels, Random random, bool average) {
+private void Run(RectInt32 selection, ColorBgr24[,] pixels, Random random, bool average) {
     if (Grayscale) {
         // colors are ordered bgra, so r is index 2
         Bar[] bars = Solve(GetBars(selection, pixels, 2), random, average);
@@ -320,7 +320,7 @@ private void Run(RectInt32 selection, ColorBgr32[,] pixels, Random random, bool 
             if (IsCancelRequested) break;
             for (int x = 0; x < selection.Width; ++x)
             {
-                ColorBgr32 sourcePixel = pixels[x, y];
+                ColorBgr24 sourcePixel = pixels[x, y];
                 byte newValue = (byte)(bars[sourcePixel[2]].ClaimValue(random));
                 sourcePixel.R = newValue;
                 sourcePixel.G = newValue;
@@ -341,7 +341,7 @@ private void Run(RectInt32 selection, ColorBgr32[,] pixels, Random random, bool 
             if (IsCancelRequested) break;
             for (int x = 0; x < selection.Width; ++x)
             {
-                ColorBgr32 sourcePixel = pixels[x, y];
+                ColorBgr24 sourcePixel = pixels[x, y];
                 sourcePixel.R = (byte)(r[sourcePixel.R].ClaimValue(random));
                 sourcePixel.G = (byte)(g[sourcePixel.G].ClaimValue(random));
                 sourcePixel.B = (byte)(b[sourcePixel.B].ClaimValue(random));
@@ -371,13 +371,14 @@ protected override void OnRender(IBitmapEffectOutput output)
 
     Random random = new Random(Seed);
 
-    ColorBgr32[,] pixels = new ColorBgr32[selection.Width, selection.Height];
+    ColorBgr24[,] pixels = new ColorBgr24[selection.Width, selection.Height];
     for (int y = 0; y < selection.Height; ++y)
     {
         if (IsCancelRequested) break;
         for (int x = 0; x < selection.Width; ++x)
         {
-            pixels[x,y] = (ColorBgr32)sourceRegion[x + selection.Left, y + selection.Top];
+            ColorBgra32 color = sourceRegion[x + selection.Left, y + selection.Top];
+            pixels[x,y] = new ColorBgr24(color.B, color.G, color.R);
         }
     }
 
@@ -392,7 +393,7 @@ protected override void OnRender(IBitmapEffectOutput output)
         if (IsCancelRequested) break;
         for (int x = 0; x < selection.Width; ++x)
         {
-            ColorBgr32 color = pixels[x, y];
+            ColorBgr24 color = pixels[x, y];
             ColorBgra32 source = sourceRegion[x + selection.Left, y + selection.Top];
             outputRegion[x + selection.Left, y + selection.Top] = new ColorBgra32(Lerp(source.B, color.B), Lerp(source.G, color.G), Lerp(source.R, color.R), source.A);
         }
