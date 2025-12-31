@@ -2,18 +2,19 @@
 // Submenu:
 // Author: Nettakrim
 // Title:
-// Version: 1.2
+// Version: 1.3
 // Desc: Evens out the histogram of the selected area
 // Keywords:
-// URL: https://netal.co.uk/
+// URL: https://github.com/Nettakrim/PDN-Plugins
 // Help: CC0 - Public Domain, when building make sure to enable Single Threaded and Single Render Call
 
 #region UICode
-DoubleSliderControl Mix = 1; // [-1,2] Mix, values outside of 0-1 will extrapolate
-DoubleSliderControl Median = 0; // [0,1] Choose the median value for each color, to remove noise
-CheckboxControl RunAgain = false; // Run twice, works well with averaging on images that have gradients
+DoubleSliderControl Mix = 1; // [-1,2] Mix, extrapolates when outside 0-1
 CheckboxControl Grayscale = false; // Grayscale, using red channel
-IntSliderControl Seed = 0; // [0,1024] Seed for all the random decisions needed
+CheckboxControl Denoising = true; // Enable denoising
+DoubleSliderControl Median = 1; // [0,1] {Denoising} Denoising Strength
+CheckboxControl RunAgain = false; // {Denoising} Run again after denoising\n(Maintains even histogram, but can reintroduce noise)
+IntSliderControl Seed = 0; // [0,65535] Seed for all the random decisions needed
 #endregion
 
 private class Bar
@@ -99,27 +100,86 @@ private class Bar
         return 0;
     }
 
-    public void Average(double mix) {
+    private void AverageSide(int start, int end, int total) {
+        int steps = Math.Abs(start-end);
+
+        if (steps == 0) {
+            values[end] += total;
+            return;
+        }
+
+        // get slope needed to spread out values in a triangle
+        // this is slightly different from the usual equation for triangular numbers, since it weights the center half (since it gets double covered by each side)
+        double slope = (2*total)/(steps*(double)steps);
+        for (int i = 1; i < steps; i++) {
+            int index = start < end ? start + (i - 1) : start - (i - 1);
+
+            int rounded = (int)Math.Round(i * slope);
+            total -= rounded;
+            values[index] = rounded;
+        }
+
+        // in most cases, there should be counts left over, but because of the rounding, this might not be true
+        if (total >= 0) {
+            values[end] += total;
+            return;
+        }
+
+        // in which case the missing total needs to be removed from the end of the triangle
+        for (int i = 1; i < steps; i++) {
+            int index = start < end ? start + (i - 1) : start - (i - 1);
+
+            total += values[index];
+
+            if (total >= 0) {
+                values[index] = total;
+                break;
+            }
+
+            values[index] = 0;
+        }
+    }
+
+
+    public void Average(double quartile) {
         if (amount == 0) {
             return;
         }
 
-        int remaining = amount;
-        int total = amount/2;
-        int average = -1;
+        // get quartile thresholds
+        int lowerAmount = (int)Math.Round(amount * quartile/2);
+        int middleAmount = (int)Math.Round(amount / 2.0);
+        int upperAmount = (int)Math.Round(amount * (1 - quartile/2));
+        int half = middleAmount;
+
+        // find quartile indices
+        int lowerIndex = -1;
+        int middleIndex = -1;
+        int upperIndex = -1;
+
         for (int i = 0; i < 256; i++) {
-            total -= values[i];
-            if (total < 0 && average == -1) {
-                average = i;
-                values[i] = 0;
+            int value = values[i];
+
+            lowerAmount -= value;
+            middleAmount -= value;
+            upperAmount -= value;
+
+            if (lowerAmount < 0 && lowerIndex == -1) {
+                lowerIndex = i;
             }
-            else {
-                values[i] = (int)(values[i] * mix);
-                remaining -= values[i];
+            if (middleAmount < 0 && middleIndex == -1) {
+                middleIndex = i;
             }
+            if (upperAmount <= 0 && upperIndex == -1) {
+                upperIndex = i;
+            }
+
+            values[i] = 0;
         }
 
-        values[average] = remaining;
+        // apply averaging to each side
+        AverageSide(lowerIndex, middleIndex, half);
+        AverageSide(Math.Max(upperIndex, middleIndex), middleIndex, amount - half);
     }
 }
 
@@ -219,9 +279,9 @@ private Bar[] Solve(Bar[] bars, Random random, bool average) {
     Diffuse(bars, random);
     Bar[] transposed = Transpose(bars);
 
-    if (Median > 0 && average) {
+    if (Denoising && average) {
         for (int i = 0; i < 256; i++) {
-            transposed[i].Average(1.0 - Median);
+            transposed[i].Average(Median);
         }
     }
 
@@ -323,7 +383,7 @@ protected override void OnRender(IBitmapEffectOutput output)
 
     Run(selection, pixels, random, true);
 
-    if (RunAgain) {
+    if (Denoising && RunAgain) {
         Run(selection, pixels, random, false);
     }
 
