@@ -395,7 +395,10 @@ protected override void OnRender(IBitmapEffectOutput output)
         {
             ColorBgr24 color = pixels[x, y];
             ColorBgra32 source = sourceRegion[x + selection.Left, y + selection.Top];
-            outputRegion[x + selection.Left, y + selection.Top] = new ColorBgra32(Lerp(source.B, color.B), Lerp(source.G, color.G), Lerp(source.R, color.R), source.A);
+            try {
+                outputRegion[x + selection.Left, y + selection.Top] = new ColorBgra32(Lerp(source.B, color.B), Lerp(source.G, color.G), Lerp(source.R, color.R), source.A);
+            }
+            catch {}
         }
     }
 }
