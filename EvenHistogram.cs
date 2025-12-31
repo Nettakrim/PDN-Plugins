@@ -2,16 +2,18 @@
 // Submenu:
 // Author: Nettakrim
 // Title:
-// Version: 1.1
+// Version: 1.2
 // Desc: Evens out the histogram of the selected area
 // Keywords:
 // URL:
 // Help: CC0 - Public Domain, when building make sure to enable Single Threaded and Single Render Call
 
 #region UICode
-IntSliderControl MaxIterations = 10000; // [0,1000000] Amount of iterations to try solve for, set to 0 to go until solved
-IntSliderControl BonusSteps = 256; // [0,256] Extra steps per iteration, massively speeds up solving, but introduces more noise
-CheckboxControl Grayscale = true; // Grayscale, using red channel
+IntSliderControl MaxIterations = 0; // [0,1000000] Amount of iterations to try solve for, set to 0 to go until solved
+IntSliderControl BonusSteps = 256; // [0,256] Extra steps per iteration, massively speeds up solving
+CheckboxControl Grayscale = false; // Grayscale, using red channel
+DoubleSliderControl Median = 0; // [0,1] Choose the median value for each color, to remove noise
+CheckboxControl RunAgain = false; // Run twice, works well with averaging, on colorful images
 IntSliderControl Seed = 0; // [0,1024] Seed for all the random decisions needed
 #endregion
 
@@ -97,7 +99,31 @@ private class Bar
 
         return 0;
     }
+
+    public void Average(double mix) {
+        if (amount == 0) {
+            return;
+        }
+
+        int remaining = amount;
+        int total = amount/2;
+        int average = -1;
+        for (int i = 0; i < 256; i++) {
+            total -= values[i];
+            if (total < 0 && average == -1) {
+                average = i;
+                values[i] = 0;
+            }
+            else {
+                values[i] = (int)(values[i] * mix);
+                remaining -= values[i];
+            }
+        }
+
+        values[average] = remaining;
+    }
 }
+
 
 private void Shift(Bar[] bars, int index, Random random) {
     // get difference needed for each side
@@ -130,11 +156,11 @@ private void Shift(Bar[] bars, int index, Random random) {
     bars[index].MoveCountTo(bars[destination], destination, shift, random);
 }
 
-private Bar[] Solve(Bar[] bars, Random random) {
+private void Diffuse(Bar[] bars, Random random) {
     // iteratively diffuse histogram
     for (int x = 0; x < MaxIterations || MaxIterations == 0; x++)
     {
-        if (IsCancelRequested) break;
+        if (IsCancelRequested) return;
 
         // get min and max
         int maxAmount = int.MinValue;
@@ -172,7 +198,9 @@ private Bar[] Solve(Bar[] bars, Random random) {
             Shift(bars, ((i ^ shuffleA)+shuffleB)&255, random);
         }
     }
+}
 
+private Bar[] Transpose(Bar[] bars) {
     // transpose histogram, so that each bar contains all the information needed for the weighted random
     Bar[] transposed = new Bar[256];
 
@@ -188,7 +216,20 @@ private Bar[] Solve(Bar[] bars, Random random) {
     return transposed;
 }
 
-private Bar[] GetBars(RectInt32 selection, RegionPtr<ColorBgra32> sourceRegion, int index) {
+private Bar[] Solve(Bar[] bars, Random random, bool average) {
+    Diffuse(bars, random);
+    Bar[] transposed = Transpose(bars);
+
+    if (Median > 0 && average) {
+        for (int i = 0; i < 256; i++) {
+            transposed[i].Average(1.0 - Median);
+        }
+    }
+
+    return transposed;
+}
+
+private Bar[] GetBars(RectInt32 selection, ColorBgr32[,] pixels, int index) {
     // initialise histogram
     Bar[] bars = new Bar[256];
     for (int i = 0; i < 256; i++)
@@ -197,16 +238,59 @@ private Bar[] GetBars(RectInt32 selection, RegionPtr<ColorBgra32> sourceRegion, 
     }
 
     // set histogram values
-    for (int y = selection.Top; y < selection.Bottom; ++y)
+    for (int y = 0; y < selection.Height; ++y)
     {
-        for (int x = selection.Left; x < selection.Right; ++x)
+        if (IsCancelRequested) break;
+        for (int x = 0; x < selection.Width; ++x)
         {
-            ColorBgra32 sourcePixel = sourceRegion[x, y];
-            bars[sourcePixel[index]].Increment(sourcePixel[index], 1);
+            int value = pixels[x, y][index];
+            bars[value].Increment(value, 1);
         }
     }
 
     return bars;
+}
+
+private void Run(RectInt32 selection, ColorBgr32[,] pixels, Random random, bool average) {
+    if (Grayscale) {
+        // colors are ordered bgra, so r is index 2
+        Bar[] bars = Solve(GetBars(selection, pixels, 2), random, average);
+
+        for (int y = 0; y < selection.Height; ++y)
+        {
+            if (IsCancelRequested) break;
+            for (int x = 0; x < selection.Width; ++x)
+            {
+                ColorBgr32 sourcePixel = pixels[x, y];
+                byte newValue = (byte)(bars[sourcePixel[2]].ClaimValue(random));
+                sourcePixel.R = newValue;
+                sourcePixel.G = newValue;
+                sourcePixel.B = newValue;
+
+                pixels[x, y] = sourcePixel;
+            }
+        }
+    }
+    else
+    {
+        Bar[] r = Solve(GetBars(selection, pixels, 2), random, average);
+        Bar[] g = Solve(GetBars(selection, pixels, 1), random, average);
+        Bar[] b = Solve(GetBars(selection, pixels, 0), random, average);
+
+        for (int y = 0; y < selection.Height; ++y)
+        {
+            if (IsCancelRequested) break;
+            for (int x = 0; x < selection.Width; ++x)
+            {
+                ColorBgr32 sourcePixel = pixels[x, y];
+                sourcePixel.R = (byte)(r[sourcePixel.R].ClaimValue(random));
+                sourcePixel.G = (byte)(g[sourcePixel.G].ClaimValue(random));
+                sourcePixel.B = (byte)(b[sourcePixel.B].ClaimValue(random));
+
+                pixels[x, y] = sourcePixel;
+            }
+        }
+    }
 }
 
 protected override void OnRender(IBitmapEffectOutput output)
@@ -224,51 +308,29 @@ protected override void OnRender(IBitmapEffectOutput output)
 
     Random random = new Random(Seed);
 
-    if (Grayscale) {
-        // colors are ordered bgra, so r is index 2
-        Bar[] bars = Solve(GetBars(selection, sourceRegion, 2), random);
-
-        for (int y = selection.Top; y < selection.Bottom; ++y)
+    ColorBgr32[,] pixels = new ColorBgr32[selection.Width, selection.Height];
+    for (int y = 0; y < selection.Height; ++y)
+    {
+        if (IsCancelRequested) break;
+        for (int x = 0; x < selection.Width; ++x)
         {
-            for (int x = selection.Left; x < selection.Right; ++x)
-            {
-                ColorBgra32 sourcePixel = sourceRegion[x, y];
-                byte newValue = (byte)(bars[sourcePixel[2]].ClaimValue(random));
-                sourcePixel.R = newValue;
-                sourcePixel.G = newValue;
-                sourcePixel.B = newValue;
-
-                // why does this cause errors? i think its due to the multi threading
-                try
-                {
-                    outputRegion[x, y] = sourcePixel;
-                }
-                catch {}
-            }
+            pixels[x,y] = (ColorBgr32)sourceRegion[x + selection.Left, y + selection.Top];
         }
     }
-    else
+
+    Run(selection, pixels, random, true);
+
+    if (RunAgain) {
+        Run(selection, pixels, random, false);
+    }
+
+    for (int y = 0; y < selection.Height; ++y)
     {
-        Bar[] r = Solve(GetBars(selection, sourceRegion, 2), random);
-        Bar[] g = Solve(GetBars(selection, sourceRegion, 1), random);
-        Bar[] b = Solve(GetBars(selection, sourceRegion, 0), random);
-
-        for (int y = selection.Top; y < selection.Bottom; ++y)
+        if (IsCancelRequested) break;
+        for (int x = 0; x < selection.Width; ++x)
         {
-            for (int x = selection.Left; x < selection.Right; ++x)
-            {
-                ColorBgra32 sourcePixel = sourceRegion[x, y];
-                sourcePixel.R = (byte)(r[sourcePixel.R].ClaimValue(random));
-                sourcePixel.G = (byte)(g[sourcePixel.G].ClaimValue(random));
-                sourcePixel.B = (byte)(b[sourcePixel.B].ClaimValue(random));
-
-                // why does this cause errors? i think its due to the multi threading
-                try
-                {
-                    outputRegion[x, y] = sourcePixel;
-                }
-                catch {}
-            }
+            ColorBgr32 color = pixels[x, y];
+            outputRegion[x + selection.Left, y + selection.Top] = new ColorBgra32(color.B, color.G, color.R, sourceRegion[x + selection.Left, y + selection.Top].A);
         }
     }
 }
