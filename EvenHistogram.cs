@@ -11,7 +11,7 @@
 #region UICode
 DoubleSliderControl Mix = 1; // [-1,2] Mix, extrapolates when outside 0-1
 CheckboxControl Grayscale = false; // Grayscale, using red channel
-CheckboxControl Denoising = true; // Enable denoising
+CheckboxControl Denoising = false; // Enable denoising
 DoubleSliderControl Median = 1; // [0,1] {Denoising} Denoising Strength
 CheckboxControl RunAgain = false; // {Denoising} Run again after denoising\n(Maintains even histogram, but can reintroduce noise)
 IntSliderControl Seed = 0; // [0,65535] Seed for all the random decisions needed
