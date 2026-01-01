@@ -2,7 +2,7 @@
 // Submenu:
 // Author: Nettakrim
 // Title:
-// Version: 1.0
+// Version: 1.1
 // Desc: XORs the results of Difference blending and Negation blending on the selected layer and the one beneath it, and/or a constant color
 // Keywords:
 // URL: https://github.com/Nettakrim/PDN-Plugins
@@ -70,6 +70,7 @@ protected override void OnRender(IBitmapEffectOutput output)
                 outputRegion[x,y] = a;
             }
         }
+        return;
     }
 
     // get lower layer
