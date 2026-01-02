@@ -1,8 +1,8 @@
-// Name: Difference ^ Negation Blend
+// Name: DNX Blend
 // Submenu:
 // Author: Nettakrim
 // Title:
-// Version: 1.1
+// Version: 1.2
 // Desc: XORs the results of Difference blending and Negation blending on the selected layer and the one beneath it, and/or a constant color
 // Keywords:
 // URL: https://github.com/Nettakrim/PDN-Plugins
@@ -12,15 +12,23 @@
 LabelComment Label1 = "Blend with layer beneath selected"; // Main Section
 DoubleSliderControl Mix = 1; // [-1,2] Mix, extrapolates when outside 0-1
 IntSliderControl Op = 0; // [0,5] Operation [XOR, AND, OR, XNOR, NAND, NOR]
+IntSliderControl Iterations = 1; // [1,16] Diff/Neg Iterations. Values > 16 loop back to 1
 LabelComment Label2 = "\n"; // Constant Section
 ColorWheelControl ConstColor = ColorWheelControl.Create(SrgbColors.Black); // Blend with a constant color
 DoubleSliderControl ConstMix = 1; // [-1,2] Mix, extrapolates when outside 0-1
 IntSliderControl ConstOp = 1; // [0,5] Operation [XOR, AND, OR, XNOR, NAND, NOR]
 #endregion
 
-private byte DNX(int a, int b, double mix, int op) {
-    int diff = Math.Abs(b-a);
-    int neg = 255 - Math.Abs(255-a-b);
+private byte DNX(int a, int b, double mix, int op, int iterations) {
+    int diff = a;
+    int neg = b;
+    int temp;
+
+    for (int i = 0; i < iterations; i++) {
+        temp = Math.Abs(neg-diff);
+        neg = 255 - Math.Abs(255-diff-neg);
+        diff = temp;
+    }
 
     int combine = op switch {
         0 => diff ^ neg,
@@ -65,7 +73,7 @@ protected override void OnRender(IBitmapEffectOutput output)
             {
                 ColorBgra32 a = sourceRegion[x,y];
                 for (int i = 0; i < 3; i++) {
-                    a[i] = DNX(a[i], constant[i], ConstMix, ConstOp);
+                    a[i] = DNX(a[i], constant[i], ConstMix, ConstOp, 1);
                 }
                 outputRegion[x,y] = a;
             }
@@ -89,7 +97,7 @@ protected override void OnRender(IBitmapEffectOutput output)
             ColorBgra32 a = sourceRegion[x,y];
             ColorBgra32 b = lowerRegion[x,y];
             for (int i = 0; i < 3; i++) {
-                a[i] = DNX(DNX(a[i],b[i], Mix, Op), constant[i], ConstMix, ConstOp);
+                a[i] = DNX(DNX(a[i],b[i], Mix, Op, Iterations), constant[i], ConstMix, ConstOp, 1);
             }
             outputRegion[x,y] = a;
         }
